@@ -13,9 +13,10 @@
 ## Run after: map_creation_final.R
 ##
 ## Specific numbered tasks:
-## 1 - Create figures for the main manuscript
-## 2 - create graphs for presentations - 'singlePercGraphs'
+## 1 - Create figures for the main manuscript - multiple percentiles
+## 2 - Create figures for the main manuscript - 'singlePercGraphs'
 ## 3 - create final tables and PDFs for the SI
+## 4 - create reviewer-requested graphs of just biodiversity combinations
 ##
 ## list of final outputs:
 ##    results/tables/final_results.csv
@@ -138,8 +139,7 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 
 brokenBoxPlots <- function(dfx, coly, amt
                            , bdx = "species richness"
-                           , yLab = paste0("TAO")
-                           # , yLab = paste0("Overlapping ", amt, " hotspots (pixels)")
+                           , yLab = expression(paste("Overlap Area (pixels)"))
                            , xxlab = "Ensemble size"){
   # dfx <- results.combined[[1]]; xall = 9; x = "70th"; coly = "Overlap"; amt = "total"
   # dfx <- results.single2[[1]]; xall = 6; x = "90th";  coly = "median_HSs"; amt = "total"; bdx = "NA"
@@ -507,9 +507,10 @@ summariseDfFunc <- function(inList # list of files to load in and combine
 }
 
 #### 0 - choose which bits to run ####
-# mainFigures <- F
-# SI <- T
-# singlePercGraphs <- T
+mainFigures <- F
+SI <- F
+singlePercGraphs <- F
+reviewerrequested <- F
 
 #### 0 - create empty lists to save ####
 whereMapsComboList <- list(); whereMapsCombo <- 0 
@@ -1068,7 +1069,7 @@ if(mainFigures){
   fwrite(ExitResultsShort, file.path("results", "tables", "ExitResultsShort.csv"), row.names = F)
 } # end 'mainFigures'
 
-#### 2 - create graphs for presentations - 'singlePercGraphs' ####
+#### 2 - create main graphs for paper using only a single percentile as the hotspot ####
 if(singlePercGraphs){
   
   # stop("singlePercGraphs")
@@ -2221,3 +2222,498 @@ if(SI){
     
   } # end of ES
 } # end 'SI'
+
+#### 4 - create reviewer-requested map of just biodiversity ####
+if(reviewerrequested){
+
+  # create graphs for only the specified percentiles
+  pcRuns <- which(spg) # identifies which ones are true
+  for(percentx in pcRuns){
+    
+    currentPerc <- ifelse(percentx == 1, 70
+                          , ifelse(percentx == 2, 80
+                                   , ifelse(percentx == 3, 90, NA)))
+    
+    # load in results that have 'END' in 
+    resultsList <- list.files(file.path("results", "tables")
+                              , pattern = "END.csv"
+                              , full.names = T
+                              , recursive = T)
+    ## keep only single-item
+    to_keep_single <- "/BD/"
+    resultsList <- resultsList[grepl(to_keep_single, resultsList)]
+    ## keep only those with '100' in
+    resultsList <- resultsList[grepl("100", resultsList)]
+    resultsList
+    
+    ## get all the unique results in terms of ES
+    esx <- gsub(".*/(.+)100.*", "\\1", resultsList) %>% unique()
+    ## keep 'sppRich' (if assessing biodiversity)
+    esx <- esx[esx == "sppRich"]
+    ### separate files into mapped ('where') and not ('howMany')
+    howManyList <- resultsList[!grepl("map", resultsList, ignore.case = T)]
+    whereList <- resultsList[grepl("map", resultsList, ignore.case = T)]
+    
+    cnt <- 0
+    togetherGraphs <- list()
+    areaGraphs <- list()
+    
+    # deal with each ES in turn
+    es <- "sppRich"
+    cat("-----------------")
+    cat("starting", es)
+    cat("-----------------\n")
+    
+    # get max combinations
+    # get title (cct)
+    # maximum BD ensemble size
+    BDmax <- 11
+    if(es == "sppRich"){
+      # BD colour palette for graphs
+      bdColour.box <- "darkred"
+      bdColour     <- "darkred"
+      bdColour.bar <- "tomato"
+    } else {
+      stop("ES not identified")
+    }
+    
+    # reduce lists to current ES
+    howManyES <- howManyList[grepl(es, howManyList)]
+    whereES <- whereList[grepl(es, whereList)]
+    
+    ##### create summarised dfs for 'how many' graphs #####
+    # load in data, and summarise
+    howManyResults <- summariseDfFunc(inList = howManyES
+                                      , colSelt = c("es", "res", "continent", "perc", "pairs"
+                                                    , "Overlap"))
+    head(howManyResults)
+    
+    # use howManyResults[[3]] to ensure the continents are done in the same order
+    conts <- howManyResults[[3]]$continent %>% unique()
+    conts
+    
+    for(contx in conts){
+      cnt <- cnt + 1
+      # stop("stop, cnt")
+      cat("\nCurrent cont:", contx, "| ")
+      # get template rasters 
+      patt <- paste0(".*", contx, "100.*")
+      
+      pattTemp <- list.files(file.path("data", "intermediate_outputs",
+                                       "continents", "rasters")
+                             , pattern = patt)
+      
+      template100 <- rast(file.path("data", "intermediate_outputs",
+                                    "continents", "rasters", 
+                                    pattTemp))
+      plot(template100, col = esColour.bar)
+      cat("Pixels:"
+          , table(template100 %>% as.vector()) %>%
+            as.data.frame() %>% dplyr::select(Freq) %>% as.numeric()
+          , "\n")
+      # Sys.sleep(10)
+      
+      ##### create boxplots for 'how many' graphs #####
+      dfx <- howManyResults[[1]] %>%
+        filter(perc == currentPerc) %>%
+        filter(continent == contx) 
+      
+      dfx2 <- dfx %>%
+        mutate(perc = paste0(perc, "th"))
+      head(dfx2)
+      
+      # create the dataset, selecting the columns of interest
+      dfnew <- dfx2 %>%
+        dplyr::select(pairs, Overlap, perc, es, res, continent) %>%
+        group_by(perc, pairs, es, res, continent) %>%
+        # summarise the data
+        summarise(median_result = median(Overlap, na.rm = TRUE)
+                  , .groups="keep") %>%
+        ungroup()
+      head(dfnew)
+      
+      cat("\nxall =", 1, "\n\n")
+      # get df
+      inDf <- dfnew
+      head(inDf)
+      print(inDf[1, ])
+      Sys.sleep(1)
+      
+      # get names
+      dataf <- data.frame(y = inDf$median_result
+                          , x = inDf$pairs %>% as.numeric()
+                          , perc = inDf$perc)
+      dfxToGraph <- dfx 
+      
+      # create boxplots based on the non-summarised data
+      ## create title for it
+      gtit2 <- paste0(contx, " | ", "Vascular plant richness")
+      gtit2
+      
+      # remove 1 and 11 ensemble size if biodiversity, due to only having one result
+      dfxToGraph <- dfxToGraph %>%
+        filter(!pairs %in% c(1, 11))
+      
+      ##### boxplot #####
+      ## and y lab
+      yllab <- expression(paste("Overlap Area (pixels)"))
+      dfbox <- ggplot() + 
+        geom_boxplot(data = dfxToGraph
+                     , aes(x=as.factor(pairs), y=Overlap, fill = perc)
+                     , position=position_dodge(1)
+                     , notch=TRUE
+                     , outliers = FALSE
+                     , outlier.shape = NA) +
+        scale_fill_manual(values = c("70" = "#999999", "80" = bdColour.box
+                                     , "90" = "#56B4E9", "95" = "#04AF70")) +
+        theme_minimal() +
+        labs(x = "Ensemble size"
+             , y = yllab
+             , fill = "Percentile") +
+        ggtitle(gtit2)
+      
+      dfbox <- dfbox + 
+        # expand_limits(y = 0) +
+        scale_y_continuous(expand = c(0, 0)) +
+        guides(colour="none")
+      dfbox
+      
+      ## get summary information
+      howManyDetails <- brokenBoxDetails(howManyResults[[1]], coly = "Overlap") %>%
+        bind_rows()
+      head(howManyDetails)
+      
+      ##### create summarised dfs for 'where' graphs #####
+      whereResults <- lapply(whereES, function(x) { fread(x) %>%
+          mutate(es = substring(basename(x), 1, 4))}) %>%
+        bind_rows() %>%
+        ### convert back to spatial
+        separate(xy, c("x", "y"), "_") %>%
+        mutate(x = gsub("m", "-", x)
+               , y = gsub("m", "-", y)
+        ) %>%
+        st_as_sf(coords = c("x", "y"), crs = 4326
+                 , remove = F) # keep co-ords
+      head(whereResults)
+      head(howManyResults)
+      # stop("howManyResults")
+      
+      # filter original results
+      ## determine which two to not include
+      notInc <- c("perc_70", "perc_80", "perc_90")
+      Inc <- paste0("perc_", currentPerc)
+      notInc <- notInc[-which(notInc %in% Inc)] # removes the one to keep
+      whereResultsCont <- whereResults %>%
+        # filter by cont
+        filter(continent == contx) %>%
+        dplyr::select(-c(all_of(notInc), perc_95)) %>%
+        # filter out NAs in perc of interest
+        filter(!is.na(.data[[Inc]]))
+      head(whereResultsCont)
+      
+      ## round x and y, then create them as character
+      sr2 <- whereResultsCont %>%
+        mutate(rcFid = paste(x, y 
+                             , sep = "_")) %>%
+        st_drop_geometry()
+      head(sr2)
+      ### make the df long
+      ppp <- sr2 %>%
+        # remove duplicate rows
+        distinct()  %>%
+        group_by(rcFid, pairs, all_of(Inc)) %>%
+        summarise(finals = sum(count, na.rm = T))
+      head(ppp)
+      
+      # start pdf for each combo of ES and continent - if it does not already exist
+      xFile <- file.path("results", "figures", "maps"
+                         , paste0(es, "_", currentPerc, "_", contx
+                                  , Sys.Date(), ".pdf"))
+      cat("save file:", xFile
+          , paste0("[", es, " | ", contx, "]")
+          , "\n")
+      
+      # get number of pixels of max coverage
+      ppMaxList <- lapply(1:BDmax, function(i){
+        x2 <- factorial(BDmax) / (factorial(i) * factorial(BDmax - i))
+        # calculate possible max amount
+        fxx <- x2
+        cat(paste0("p:", i, " [mxC: ", fxx , "]"), "\n") # max combos
+        
+        # make longer, to sum the pixels that were hotspots for different percentiles
+        pppFil <- ppp %>%
+          # filter by pairs
+          filter(pairs == i) %>%
+          pivot_longer(!c(rcFid, pairs, finals)) %>%
+          group_by(rcFid, pairs, value, name) %>%
+          summarise(finalSum = sum(finals)) %>%
+          filter(!is.na(value)) %>%
+          rename(perc = value) %>%
+          # convert x and y back
+          separate_wider_delim(rcFid, "_", names = c('x', 'y')) %>%
+          # create as point data
+          st_as_sf(coords = c("x", "y")
+                   , crs = 4326)
+        
+        normGraphsPC <- lapply(currentPerc, function(percx){
+          cat(" Current perc:", percx, "\n")
+          
+          # just current perc
+          pppFilPerc <- pppFil %>%
+            filter(grepl(percx, perc))
+          # head(pppFilPerc)
+          
+          # rasterise
+          pppRaster <- terra::rasterize(vect(pppFilPerc)
+                                        , template100
+                                        , field = "finalSum")
+          pppRaster[is.na(pppRaster)] <- 0
+          
+          # plot(pppRaster, main = perc)
+          # mask 
+          pppRaster <- mask(pppRaster, template100)
+          # plot(pppRaster, main = percx)
+          # table(as.vector(pppRaster))
+          
+          # normalise
+          pppRasterNorm <- normalise(pppRaster, mx = fxx)
+          # plot(pppRasterNorm, main = percx)
+          
+          # graph label
+          gLabel <- paste0("ensemble size: ", i, " [", fxx, "]")
+          
+          # set text position
+          if(contx == "Africa"){
+            hj <- 1.8
+            vj <- 5
+          } else if(contx == "South America"){
+            hj <- 1.3
+            vj <- 5
+          } else {
+            hj <- 0
+            vj <- 5
+          }
+          
+          ##### maps #####
+          # create graph
+          ppGrp <- ggplot() +
+            geom_spatraster(data = pppRasterNorm, aes(fill = last)) +
+            # ggtitle(paste0(cct, " & vascular plant richness in ", contx)) +
+            ggtitle(gLabel) +
+            scale_fill_gradientn(
+              colours = c("grey", "darkblue", "lightblue", "peru"), # Add grey to the beginning
+              values = scales::rescale(c(0, 0.01, 0.99, 1)), # Ensure 'grey' is mapped to 0, 
+              # others are scaled accordingly
+              limits = c(0, 1),  # Set the min and max limits of the scale
+              na.value = "white"
+            ) +
+            geom_text() +
+            # annotate("text", label = gLabel, x = Inf, y = Inf
+            #          , hjust = hj
+            #          # , vjust = "bottom"
+            #          , vjust = vj
+            #          , size = 4, colour = "red") +
+            theme_bw() +
+            theme(
+              axis.title = element_blank(), # Remove axis titles
+              axis.text = element_blank(),  # Remove axis text
+              axis.ticks = element_blank()  # Remove axis ticks
+            )
+          # plot(ppGrp)
+          
+          return(ppGrp)
+        }) # percentile
+        
+        # for saving as a graph later, get all the results that equal max possible
+        pppMax <- pppFil %>%
+          filter(finalSum == fxx)
+        head(pppMax)
+        ## save, for graphing, using count to get total pixel number
+        ppM <- pppMax %>% st_drop_geometry() %>%
+          group_by(pairs, perc) %>%
+          summarise(total_100pc_pix = n()) %>%
+          mutate(eco_sys = es, continent = contx)      
+        return(list(normGraphsPC, ppM))
+      })
+      ppMaxList[[2]]
+      
+      # get max info
+      whereDetails <- lapply(c(1:BDmax), function(pp){
+        ppMaxList[[pp]][[2]]
+      }) %>% bind_rows() %>%
+        filter(perc == currentPerc)
+      # get max info
+      whereDetailsAll <- lapply(c(1:ESmax), function(pp){
+        ppMaxList[[pp]][[2]]
+      }) %>% bind_rows() 
+      stopifnot(length(unique(whereDetailsAll$total_100pc_pix)) > 1)
+      if(contx == conts[[1]]){
+        whereDetailsAllComb <- whereDetailsAll
+      } else {
+        whereDetailsAllComb <- bind_rows(whereDetailsAllComb
+                                         , whereDetailsAll)
+      }
+      
+      ##### create graphs for 'where' graphs #####
+      # get all the maxes
+      ppMaxDf <- lapply(1:BDmax, function(pp){
+        ppMaxList[[pp]][[2]]
+      }) %>% bind_rows()  %>%
+        rename(es = eco_sys)
+      head(ppMaxDf)
+      # convert perc to factor
+      whereGraphdf <- ppMaxDf %>%
+        mutate(perc = paste0(perc, "th")) %>%
+        mutate(esNo = as.factor(pairs))
+      head(whereGraphdf)
+      
+      # stop("3342")
+      
+      # remove 1, 11 ensemble size if biodiversity, due to only having one result
+      if(es == "Carb"){
+        whereGraphdf <- whereGraphdf %>%
+          filter(!esNo %in% c(1, 11))
+      }
+      
+      # Add the new levels with value 0 (if not all are present)
+      ## see which are current
+      cnn <- as.numeric(as.character(whereGraphdf$esNo))
+      cFac <- which(!c(1:max(cnn)) %in% cnn)
+      whereGraphdf <- bind_rows(
+        data.frame(esNo = factor(c(cFac), levels = c(1:max(cnn))), value = c(rep(0, length(cFac)))),
+        whereGraphdf
+      ) %>%
+        mutate(perc = paste0("perc_", currentPerc, "th"))
+      
+      # create barcharts based on the non-summarised data
+      ## create title for it
+      gtit2 <- paste0(contx, " | ", "Vascular plant richness")
+      ## and y lab
+      # yllab <- paste0("Spatial agreement of ES / BD hotspots (pixels)")
+      yllab <- expression(paste("Spatial Agreement (pixels)"))
+      
+      ##### barchart #####
+      # barchart
+      dfbar <- ggplot(data = whereGraphdf
+                      , aes(x = esNo, y = total_100pc_pix, fill = perc)) +
+        geom_bar(stat = "identity"
+                 , position = position_dodge(preserve = "single")) +
+        scale_fill_manual(values = c("perc_70th" = "#999999", "perc_80th" = bdColour.bar
+                                     , "perc_90th" = "#56B4E9", "perc_95th" = "#04AF70")
+                          , labels = c(currentPerc)) +
+        # scale_x_discrete(expand = c(0, 0), limits = c(0, max(cnn))) +
+        theme_minimal() +
+        labs(x = "Ensemble size"
+             , y = yllab
+             , fill = "Percentile") +
+        ggtitle(gtit2)
+      dfbar
+      
+      togetherGraphs[[cnt]] <- dfbar
+      areaGraphs[[cnt]] <- dfbox
+      
+      print(c(togetherGraphs = length(togetherGraphs)))
+      # stop("end cont")
+    } # end of 'contx'
+    
+    # save the image
+    thatsnumberwang <- 4
+    
+    # start pdf for each combo of ES and continent - if it does not already exist
+    xFile <- file.path("results", "figures"
+                       , paste0("singlePercGraphs_", currentPerc, "_", Sys.Date(), ".pdf"))
+    cat("save file:", xFile
+        , "\n")
+    pdf(xFile)
+    for(i in seq_along(togetherGraphs)){
+      print(i)
+      
+      plot(togetherGraphs[[i]])
+      plot(areaGraphs[[i]])
+      
+    }
+    dev.off()
+    cat("---------- patchOut saved ----------\n")
+    
+    # save all graphs together
+    ## first, Extract the title for all entries in the list togetherGraphs
+    titles <- strsplit(sapply(togetherGraphs, function(graph) graph$labels$title), " | ",  fixed=TRUE)
+    ### ensure it matches total area
+    titlesAO <- strsplit(sapply(areaGraphs, function(graph) graph$labels$title), " | ",  fixed=TRUE)
+    stopifnot(identical(titles, titlesAO))
+    titlesp1 <- sapply(titles, function(x) x[[1]]); titlesp1
+    titlesp2 <- sapply(titles, function(x) x[[2]]); titlesp2
+    utitle <- unique(gsub("^(.+) &.*", "\\1", titlesp2))
+    
+    xxList <- list() # list to save the 6 continent graphs for each ES
+    for(x in utitle){
+      cat(x, "| ")
+      xChoice <- which(grepl(x, titlesp2)) # extract appropriate graphs
+      
+      for(xx in xChoice){
+        cat(xx, "\n")
+        
+        if(!xx %in% c(2, 5, 8, 11, 14, 17)){
+          
+          xxList[[xx]] <- (areaGraphs[[xx]] + 
+                             theme(axis.title.y = element_blank()) + 
+                             theme(plot.title = element_blank()
+                                   , axis.title.x = element_text(size = 14)) + guides(fill = "none") 
+                           | 
+                             togetherGraphs[[xx]] +
+                             theme(axis.title.y = element_blank()) + 
+                             theme(plot.title = element_blank()
+                                   , axis.title.x = element_text(size = 14)) + guides(fill = "none")) +
+            plot_annotation(title = titlesp1[[xx]],
+                            tag_levels = 'A'
+                            , theme = theme(plot.title = element_text(hjust = 0.5)  # Centre the title horizontally
+                            ))
+        } else {
+          
+          xxList[[xx]] <- (areaGraphs[[xx]] + 
+                             theme(plot.title = element_blank()
+                                   , axis.title.y = element_text(size = 14), axis.title.x = element_text(size = 14)
+                             ) + guides(fill = "none")
+                           | 
+                             togetherGraphs[[xx]] + 
+                             theme(plot.title = element_blank()
+                                   , axis.title.y = element_text(size = 14), axis.title.x = element_text(size = 14)) + 
+                             guides(fill = "none")) +
+            plot_annotation(title = titlesp1[[xx]],
+                            tag_levels = 'A'
+                            , theme = theme(plot.title = element_text(hjust = 0.5)  # Centre the title horizontally
+                            ))
+        }
+      }
+      
+      patchOut <- (wrap_elements(xxList[[xChoice[1]]]) / wrap_elements(xxList[[xChoice[2]]]) / wrap_elements(xxList[[xChoice[3]]])
+                   |
+                     wrap_elements(xxList[[xChoice[4]]]) / wrap_elements(xxList[[xChoice[5]]]) / wrap_elements(xxList[[xChoice[6]]])
+      ) +
+        plot_annotation(title = titlesp2[[xChoice[1]]]
+                        , theme = theme(plot.title = element_text(size = 16, vjust = 0, hjust = 0.5))
+                        , caption = Sys.Date())
+      patchOut
+      # stop("after patch in single-perc")
+      
+      # save the image
+      cat("---------- patchOut saving", x, "----------\n")
+      es <- "biod"
+      thatsnumberwang <- 4
+      
+      png(file.path("results", "figures",
+                    paste0("Fig", thatsnumberwang, "_", currentPerc, "_", es, Sys.Date(), ".png"))
+          , res = 200
+          , height = 2000, width = 2500)
+      print(patchOut)
+      dev.off()
+      
+      # save as a R data in case changes are required
+      save(patchOut, file = file.path("results", "figures",
+                                      paste0("Fig", thatsnumberwang, "_", currentPerc, "_", es, ".RData")))
+      
+      # stop("after saving bar and box plots")
+      
+    } # different title 'utitle'
+  } # percentx in pcRuns
+} # reviewerrequested
