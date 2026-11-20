@@ -14,7 +14,7 @@
 ##
 ## Specific numbered tasks:
 ## 1 - Create figures for the main manuscript - multiple percentiles
-## 2 - Create figures for the main manuscript - 'singlePercGraphs'
+## 2 - Create figures for the main manuscript - 'manuscript_figures'
 ## 3 - create final tables and PDFs for the SI
 ## 4 - create reviewer-requested graphs of just biodiversity combinations
 ##
@@ -507,17 +507,17 @@ summariseDfFunc <- function(inList # list of files to load in and combine
 }
 
 #### 0 - choose which bits to run ####
-mainFigures <- F
+figures_three_percentiles <- F
 SI <- F
-singlePercGraphs <- F
+manuscript_figures <- T
 reviewerrequested <- F
 
 #### 0 - create empty lists to save ####
 whereMapsComboList <- list(); whereMapsCombo <- 0 
 
-#### 1 - Create figures for the main manuscript ####
+#### 1 - Create figures that show the three different percentiles ####
 # get dfs for each ES
-if(mainFigures){
+if(figures_three_percentiles){
   # load in results that have 'END' in 
   resultsList <- list.files(file.path("results", "tables")
                             , pattern = "END.csv"
@@ -893,12 +893,12 @@ if(mainFigures){
     
     # save the image
     cat("---------- patchOut saved ----------\n")
-    thatsnumberwang <- ifelse(es == "Recr", 3
+    numbered <- ifelse(es == "Recr", 3
                               , ifelse(es == "Wate", 2
                                        , ifelse(es == "Carb", 1)
                               ))
     png(file.path("results", "figures",
-                  paste0("Fig", thatsnumberwang, "_ES_", es, ".png"))
+                  paste0("Fig", numbered, "_ES_", es, ".png"))
         , res = 200
         , height = 2000, width = 2500)
     print(patchOut)
@@ -1067,12 +1067,12 @@ if(mainFigures){
   head(ExitResultsShort)
   # save the table
   fwrite(ExitResultsShort, file.path("results", "tables", "ExitResultsShort.csv"), row.names = F)
-} # end 'mainFigures'
+} # end 'figures_three_percentiles'
 
 #### 2 - create main graphs for paper using only a single percentile as the hotspot ####
-if(singlePercGraphs){
+if(manuscript_figures){
   
-  # stop("singlePercGraphs")
+  # stop("manuscript_figures")
   
   # create graphs for only the specified percentiles
   pcRuns <- which(spg) # identifies which ones are true
@@ -1477,15 +1477,16 @@ if(singlePercGraphs){
       } # end of 'contx'
       
       # save the image
-      thatsnumberwang <- ifelse(es == "Recr", 3
+      numbered <- ifelse(es == "Recr", 3
                                 , ifelse(es == "Wate", 2
                                          , ifelse(es == "Carb", 1)
                                 ))
     }
     
+    
     # start pdf for each combo of ES and continent - if it does not already exist
     xFile <- file.path("results", "figures"
-                       , paste0("singlePercGraphs_", currentPerc, "_", Sys.Date(), ".pdf"))
+                       , paste0("manuscript_figures_", currentPerc, "_", Sys.Date(), ".pdf"))
     cat("save file:", xFile
         , "\n")
     pdf(xFile)
@@ -1565,12 +1566,15 @@ if(singlePercGraphs){
                    , ifelse(grepl("recreation", x, ignore.case = T), "Recr"
                             , ifelse(grepl("wate", x, ignore.case = T), "Wate")))
       
-      thatsnumberwang <- ifelse(es == "Recr", 3
+      numbered <- ifelse(es == "Recr", 3
                                 , ifelse(es == "Wate", 2
                                          , ifelse(es == "Carb", 1)))
       
-      png(file.path("results", "figures",
-                    paste0("Fig", thatsnumberwang, "_", currentPerc, "_", es, Sys.Date(), ".png"))
+      save_png_path <- file.path("results", "figures",
+                                 paste0("Fig", numbered, "_", currentPerc, "_", es, Sys.Date(), ".png"))
+      cat("save file:", save_png_path
+          , "\n")
+      png(save_png_path
           , res = 200
           , height = 2000, width = 2500)
       print(patchOut)
@@ -1578,13 +1582,13 @@ if(singlePercGraphs){
       
       # save as a R data in case changes are required
       save(patchOut, file = file.path("results", "figures",
-                                      paste0("Fig", thatsnumberwang, "_", currentPerc, "_", es, ".RData")))
+                                      paste0("Fig", numbered, "_", currentPerc, "_", es, ".RData")))
       
       # stop("after saving bar and box plots")
       
     } # different title 'utitle'
   } # percentx in pcRuns
-} # end 'singlePercGraphs'
+} # end 'manuscript_figures'
 
 #### 3 - create final tables and PDFs for the SI ####
 if(SI){
@@ -2617,11 +2621,11 @@ if(reviewerrequested){
     } # end of 'contx'
     
     # save the image
-    thatsnumberwang <- 4
+    numbered <- 4
     
     # start pdf for each combo of ES and continent - if it does not already exist
     xFile <- file.path("results", "figures"
-                       , paste0("singlePercGraphs_", currentPerc, "_", Sys.Date(), ".pdf"))
+                       , paste0("manuscript_figures_", currentPerc, "_", Sys.Date(), ".pdf"))
     cat("save file:", xFile
         , "\n")
     pdf(xFile)
@@ -2699,10 +2703,10 @@ if(reviewerrequested){
       # save the image
       cat("---------- patchOut saving", x, "----------\n")
       es <- "biod"
-      thatsnumberwang <- 4
+      numbered <- 4
       
       png(file.path("results", "figures",
-                    paste0("Fig", thatsnumberwang, "_", currentPerc, "_", es, Sys.Date(), ".png"))
+                    paste0("Fig", numbered, "_", currentPerc, "_", es, Sys.Date(), ".png"))
           , res = 200
           , height = 2000, width = 2500)
       print(patchOut)
@@ -2710,7 +2714,7 @@ if(reviewerrequested){
       
       # save as a R data in case changes are required
       save(patchOut, file = file.path("results", "figures",
-                                      paste0("Fig", thatsnumberwang, "_", currentPerc, "_", es, ".RData")))
+                                      paste0("Fig", numbered, "_", currentPerc, "_", es, ".RData")))
       
       # stop("after saving bar and box plots")
       

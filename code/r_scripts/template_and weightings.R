@@ -166,11 +166,16 @@ foreachIntersectFunc <- function(inGridSmall = rGrid
                            # Extract just one grid square from the larger grid
                            chunk <- inGridLarge[iGrs, ]
                            
-                           # Subset the part of inGridSmall that intersects with the current chunk
-                           rLargerGrid_chunk <- st_intersection(inGridSmall, chunk) %>%
-                             st_make_valid()
-                           rLargerGrid_chunk <- checkValidAdjust(rLargerGrid_chunk)
-                           head(rLargerGrid_chunk)
+                           # Subset only the small‑grid cells that intersect the current chunk
+                           small_hits <- st_intersects(inGridSmall, chunk, sparse = TRUE)[[1]]
+                           
+                           if(length(small_hits) == 0){
+                             rLargerGrid_chunk <- NULL
+                           } else {
+                             rLargerGrid_chunk <- inGridSmall[small_hits, ] %>%
+                               st_make_valid() %>%
+                               checkValidAdjust()
+                           }
                            
                            # ggplot() +
                            #   geom_sf(data = hexesBDCo, fill = "red") +
@@ -178,11 +183,30 @@ foreachIntersectFunc <- function(inGridSmall = rGrid
                            #   geom_sf(data = rLargerGrid_chunk, colour = "black", alpha = 0.7)
                            
                            # Perform the intersection
-                           intersectionResult <- st_intersection(rLargerGrid_chunk, hexIn)
-                           intersectionResult <- checkValidAdjust(intersectionResult)
-                           intersectionResult <- intersectionResult %>%
-                             # Get area
-                             mutate(pixArea = st_area(.))
+                           # Identify only hexagons that intersect the current chunk
+                           hex_hits <- st_intersects(hexIn, chunk, sparse = TRUE)[[1]]
+                           
+                           if(length(hex_hits) == 0){
+                             intersectionResult <- NULL
+                           } else {
+                             
+                             hex_subset <- hexIn[hex_hits, ]
+                             
+                             # Perform geometric intersection only on the filtered subsets
+                             intersectionResult <- suppressWarnings(
+                               st_intersection(rLargerGrid_chunk, hex_subset)
+                             )
+                             
+                             if(nrow(intersectionResult) > 0){
+                               intersectionResult <- intersectionResult %>%
+                                 mutate(pixArea = as.numeric(st_area(.)))
+                             }
+                             
+                             intersectionResult <- checkValidAdjust(intersectionResult)
+                             intersectionResult <- intersectionResult %>%
+                               # Get area
+                               mutate(pixArea = st_area(.)) 
+                           }
                            
                            return(intersectionResult)
                          } # 'foreach' end
@@ -218,22 +242,43 @@ resDegreesLat <- metres_to_degrees_latitude(88000)
 resDegreesLong <- metres_to_degrees_longitude(88000, resDegreesLat)
 
 ##### Ecosystem service #####
-# load in a template that is the same extent and resolution as in Willcock et al. (2023)
-# this ensures that they can keep the same results when coarsened
-resres <- c(0.008333, 0.008333) # set the res which is 1 km (in EPSG 4326)
-### get rounded extent
-xmin.new <- -180
-xmax.new <- 180
-ymin.new <- -65
-ymax.new <- 90
-## create as a new raster
-templateRaster.res100 <- rast(ext=c(xmin.new, xmax.new
-                                    , ymin.new, ymax.new)
-                              , res = resres # copy resolution
-                              , vals = 1) %>%
-  ## coarsen the data by a factor of 100, making it 100 x 100 km2
-  aggregate(., fact=100, fun=mean) 
+makeTemplateRaster <- function(
+    res_km      = 1,        # desired resolution in km
+    extent_vec  = c(-180, 180, -65, 90),   # xmin, xmax, ymin, ymax
+    base_res_km = 1         # base resolution to start from (1 km in Willcock et al.)
+){
+  
+  # Convert km → degrees (approx; EPSG:4326)
+  # 1 km ≈ 0.008333 degrees
+  km_to_deg <- 0.008333
+  base_res_deg <- base_res_km * km_to_deg
+  
+  # Create base raster at 1 km (or chosen base)
+  r_base <- rast(
+    ext = extent_vec,
+    res = c(base_res_deg, base_res_deg),
+    vals = 1
+  )
+  
+  # Aggregation factor needed to reach desired resolution
+  # Example: res_km = 100 → fact = 100
+  fact <- res_km / base_res_km
+  
+  if(fact < 1){
+    stop("Requested resolution is finer than base resolution; use disaggregate() instead.")
+  }
+  
+  # Aggregate to desired resolution
+  r_out <- aggregate(r_base, fact = fact, fun = mean)
+  
+  return(r_out)
+}
+
+templateRaster.res100 <- makeTemplateRaster(res_km = 100)
 templateRaster.res100
+
+templateRaster.res10 <- makeTemplateRaster(res_km = 10)
+templateRaster.res10
 
 ##### Continent shapefiles #####
 # Download continent shapefiles
@@ -348,6 +393,96 @@ for(co in cont.unique){
     coSaveName <- file.path(pathDataInter, "biodiversity"
                             , paste0(substring(co, 1, 4)
                                      , "_BD_100_smallGrid.gpkg"))
+    if(!file.exists(coSaveName)){
+      st_write(rGrid, coSaveName, append = F)
+    }
+    
+    largeGrid <- largeGridFunc(rGrid)
+    head(largeGrid)
+    doesIntersect <- doesIntersectFunc()
+    
+    ## ------------ Notes --------------  ##
+    ## To get a value of the mean per pixel (i.e., using the 
+    ## all polygons it overlaps by area), this has to be done
+    ## in several steps, as below.
+    ## First, get the intersections between the square grid and hexagons
+    ## get a weighted mean value based on the area of crossover
+    ## then, create final raster
+    ## ------------ ----- --------------  ##
+    
+    # run parallel function that determines intersections, and then saves the output
+    resultsListOut <- foreachIntersectFunc(inGridSmall = rGrid)
+    head(resultsListOut)
+    
+    # bind the output
+    resultsListBind <- bind_rows(resultsListOut) %>%
+      st_drop_geometry()
+    head(resultsListBind)
+    ## calculate the proportions
+    rlProport <- resultsListBind %>%
+      group_by(smlGrd_ID) %>%
+      summarise(totArea = sum(pixArea)) %>%
+      ## merge back
+      merge(resultsListBind, .) %>%
+      mutate(proportion = pixArea/totArea)
+    head(rlProport)
+    ### save the information
+    fwrite(rlProport
+           , resultsSaveName
+           , row.names = F)
+  }
+  # beep(8)
+  Sys.sleep(1)
+  
+  ##### 10 grid #####
+  
+  cat("\n\n")
+  cat("----------- xxx -----------")
+  cat("\nStarting the 10 * 10 km section for", co, "\n")
+  cat("----------- ooo -----------")
+  
+  ## ------------ Notes --------------  ##
+  ## Repeat the above actions, but for 10 * 10 km pixels of ES
+  ## ------------ ----- --------------  ##
+  
+  resultsSaveName <- paste0("data/"
+                            , co
+                            , "_biodiversity_10_weighting.csv")
+  
+  if(file.exists(resultsSaveName)){
+    cat("\n", resultsSaveName, "already exists ...\n")
+  } else {
+    
+    # crop the ES 10 km raster to the continent
+    rastESCo <- templateRaster.res10 %>%
+      crop(., continents.one) %>%
+      mask(., continents.one)
+    plot(rastESCo)
+    # save, to check
+    # writeRaster(rastESCo, "data/checks/ES10.tif", overwrite = T)
+    
+    ## save for future use
+    writeRaster(rastESCo, file.path(pathDataInter, "continents", "rasters"
+                                    , paste0(co, "10template.tif"))
+                , overwrite = T)
+    ### get the resolution, in degrees, of the raster
+    res10m <- res(rastESCo)
+    
+    # label the polygons, for ID later
+    hexesBDCo <- hexesBDCo %>%
+      mutate(hex_id_7774 = paste0(co, "_", 1:n())) %>%
+      # keep only certain cols
+      dplyr::select(hex_id_7774, grid_ID, point_x, point_y)
+    head(hexesBDCo)
+    hexesBDCo <- checkValidAdjust(hexesBDCo)
+    # determine which parts of the grids overlap
+    rGrid <- smallGridFunc(tRast = rastESCo
+                           , resLong = res10m, resLat = res10m)
+    head(rGrid)
+    ## save the small grid, once per continent
+    coSaveName <- file.path(pathDataInter, "biodiversity"
+                            , paste0(substring(co, 1, 4)
+                                     , "_BD_10_smallGrid.gpkg"))
     if(!file.exists(coSaveName)){
       st_write(rGrid, coSaveName, append = F)
     }

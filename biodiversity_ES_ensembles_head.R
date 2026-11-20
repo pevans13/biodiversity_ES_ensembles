@@ -39,13 +39,13 @@ correlateData <- F
 # Step: run hotspot analysis using percentiles
 hotspotPercentiles <- F
 # Step: create the final maps and / or final graphs
-graph_creation_final <- T
+graph_creation_final <- F
 map_creation_final <- F
 # Step: create final figures for main and / or SI
-finalFigures <- F
+finalFigures <- T
 # choose which figures to run
 mainFigures <- F
-SI <- F
+SI <- T
 singlePercGraphs <- F
 ## which percentiles to include?
 spg <- c(
